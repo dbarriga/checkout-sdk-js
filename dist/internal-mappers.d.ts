@@ -15,6 +15,7 @@ declare interface AddressRequestBody {
     countryCode: string;
     postalCode: string;
     phone: string;
+    email?: string;
     customFields: Array<{
         fieldId: string;
         fieldValue: string;
