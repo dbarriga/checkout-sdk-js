@@ -7,66 +7,58 @@ import PaymentActionCreator from '../../payment-action-creator';
 import { PaymentInitializeOptions, PaymentRequestOptions } from '../../payment-request-options';
 import PaymentStrategy from '../payment-strategy';
 
-import { AffirmAddress, AffirmDiscount, AffirmItem, AffirmRequestData, SCRIPTS_DEFAULT } from './affirm';
-import affirmJs from './affirmJs';
-declare let affirm: any;
+import { Affirm, AffirmAddress, AffirmDiscount, AffirmItem, AffirmRequestData } from './affirm';
+import AffirmScriptLoader from './affirm-script-loader';
 
 export default class AffirmPaymentStrategy implements PaymentStrategy {
+
+    private affirm?: Affirm;
 
     constructor(
         private _store: CheckoutStore,
         private _orderActionCreator: OrderActionCreator,
         private _paymentActionCreator: PaymentActionCreator,
-        private _remoteCheckoutActionCreator: RemoteCheckoutActionCreator
+        private _remoteCheckoutActionCreator: RemoteCheckoutActionCreator,
+        private _affirmScriptLoader: AffirmScriptLoader
     ) { }
 
     initialize(options: PaymentInitializeOptions): Promise<InternalCheckoutSelectors> {
         const state = this._store.getState();
         const paymentMethod = state.paymentMethods.getPaymentMethod(options.methodId, options.gatewayId);
 
-        if (!paymentMethod ) {
+        if (!paymentMethod) {
             throw new MissingDataError(MissingDataErrorType.MissingPaymentMethod);
         }
 
         const { testMode } = paymentMethod.config;
         const { publicKey } = paymentMethod.initializationData;
 
-        affirmJs(publicKey, this._getScriptURI(testMode));
-
-        return Promise.resolve(this._store.getState());
+        return this._affirmScriptLoader.load(publicKey, testMode)
+            .then(affirm => {
+                this.affirm = affirm;
+                return this._store.getState();
+            });
     }
 
     execute(payload: OrderRequestBody, options?: PaymentRequestOptions): Promise<InternalCheckoutSelectors> {
         const paymentId = payload.payment && payload.payment.methodId;
         const { useStoreCredit } = payload;
-        const state = this._store.getState();
-        const config = state.config.getStoreConfig();
 
         if (!paymentId) {
             throw new PaymentArgumentInvalidError(['payment.methodId']);
         }
 
-        if (!config) {
-            throw new MissingDataError(MissingDataErrorType.MissingCheckoutConfig);
-        }
-
         return this._store.dispatch(this._remoteCheckoutActionCreator.initializePayment(paymentId, { useStoreCredit }))
-            .then(affirm.checkout(this._initializeCheckout(useStoreCredit)))
-            .then(affirm.checkout.open())
-            .then(affirm.ui.ready(
-                () => {
-                    affirm.ui.error.on('close', () => {
-                        window.location.href = `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`;
-                    });
-                }
-            ))
-            .then(() => new Promise<never>(() => {  }));
+            .then(() => {
+                this._affirmCalls(useStoreCredit)
+                return new Promise<never>(() => { });
+            });
 
     }
 
     deinitialize(options?: PaymentRequestOptions): Promise<InternalCheckoutSelectors> {
-        if (affirm) {
-            affirm = undefined;
+        if (this.affirm) {
+            this.affirm = undefined;
         }
 
         return Promise.resolve(this._store.getState());
@@ -105,11 +97,30 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             });
     }
 
-    private _getScriptURI(testMode: boolean = false): string {
-        return testMode ? SCRIPTS_DEFAULT.SANDBOX : SCRIPTS_DEFAULT.PROD;
-    }
+    private _affirmCalls(useStoreCredit: boolean = false) {
+        const state = this._store.getState();
+        const config = state.config.getStoreConfig();
 
-    private _initializeCheckout(useStoreCredit: boolean = false): AffirmRequestData {
+        if (!this.affirm) {
+            throw new NotInitializedError(NotInitializedErrorType.PaymentNotInitialized);
+        }
+
+        if (!config) {
+            throw new MissingDataError(MissingDataErrorType.MissingCheckoutConfig);
+        }
+
+        this.affirm.checkout(this._getCheckoutInformation(useStoreCredit));
+        this.affirm.checkout.open();
+        /*this.affirm.ui.ready(
+            () => {
+                const _this = this;
+                this.affirm.ui.error.on('close', () => {
+                    window.location.href = `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`;
+                });
+            }
+        )*/
+    }
+    private _getCheckoutInformation(useStoreCredit: boolean = false): AffirmRequestData {
         const state = this._store.getState();
         const checkout = state.checkout.getCheckout();
         const config = state.config.getStoreConfig();
@@ -132,17 +143,17 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         if (!consigment || !consigment.selectedShippingOption) {
             throw new MissingDataError(MissingDataErrorType.MissingCheckout);
         }
-        const grandTotal = useStoreCredit ? checkout.grandTotal -  checkout.customer.storeCredit : checkout.grandTotal;
-        const affirmRequestObject: AffirmRequestData = {
+        const grandTotal = useStoreCredit ? checkout.grandTotal - checkout.customer.storeCredit : checkout.grandTotal;
+        const affirmRequestObject = {
             merchant: {
                 user_confirmation_url: `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=success`,
                 user_cancel_url: `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`,
                 user_confirmation_url_action: 'POST',
             },
-            shipping: this._setShippingAddress(),
-            billing: this._setBillingAddress(),
-            items: this._buildItems(),
-            discounts: this._setDiscounts(),
+            shipping: this._getShippingAddress(),
+            billing: this._getBillingAddress(),
+            items: this._getItems(),
+            discounts: this._getDiscounts(),
             metadata: {
                 shipping_type: consigment.selectedShippingOption.type,
             },
@@ -155,7 +166,7 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         return affirmRequestObject;
     }
 
-    private _setBillingAddress(): AffirmAddress {
+    private _getBillingAddress(): AffirmAddress {
         const state = this._store.getState();
         const billingAddress = state.billingAddress.getBillingAddress();
 
@@ -184,17 +195,12 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         return billingInformation;
     }
 
-    private _setShippingAddress(): AffirmAddress {
+    private _getShippingAddress(): AffirmAddress {
         const state = this._store.getState();
         const shippingAddress = state.shippingAddress.getShippingAddress();
-        const billingAddress = state.billingAddress.getBillingAddress();
 
         if (!shippingAddress) {
             throw new MissingDataError(MissingDataErrorType.MissingShippingAddress);
-        }
-
-        if (!billingAddress) {
-            throw new MissingDataError(MissingDataErrorType.MissingBillingAddress);
         }
 
         const shippingInformation = {
@@ -212,13 +218,12 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
                 country: shippingAddress.countryCode,
             },
             phone_number: shippingAddress.phone,
-            email: shippingAddress.email || billingAddress.email,
         };
 
         return shippingInformation;
     }
 
-    private _buildItems(): AffirmItem[] {
+    private _getItems(): AffirmItem[] {
         const state = this._store.getState();
         const cart = state.cart.getCart();
 
@@ -227,26 +232,56 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         }
         const items: AffirmItem[] = [];
 
-        for (const key in cart.lineItems) {
-            if (key) {
-                const itemType = (cart.lineItems as any)[key];
-                for (const line of itemType) {
-                    items.push({
-                        display_name: line.name,
-                        sku: line.sku,
-                        unit_price: line.salePrice,
-                        qty: line.quantity,
-                        item_image_url: line.imageUrl,
-                        item_url: line.url,
-                    });
-                }
+        for (const item of cart.lineItems.physicalItems) {
+            items.push({
+                display_name: item.name,
+                sku: item.sku,
+                unit_price: item.salePrice,
+                qty: item.quantity,
+                item_image_url: item.imageUrl,
+                item_url: item.url,
+            });
+        }
+
+        for (const item of cart.lineItems.digitalItems) {
+            items.push({
+                display_name: item.name,
+                sku: item.sku,
+                unit_price: item.salePrice,
+                qty: item.quantity,
+                item_image_url: item.imageUrl,
+                item_url: item.url,
+            });
+        }
+
+        if (cart.lineItems.customItems) {
+            for (const item of cart.lineItems.customItems) {
+                items.push({
+                    display_name: item.name,
+                    sku: item.sku,
+                    unit_price: item.listPrice,
+                    qty: item.quantity,
+                    item_image_url: '',
+                    item_url: '',
+                });
             }
+        }
+
+        for (const item of cart.lineItems.giftCertificates) {
+            items.push({
+                display_name: item.name,
+                sku: '',
+                unit_price: item.amount,
+                qty: 1,
+                item_image_url: '',
+                item_url: '',
+            });
         }
 
         return items;
     }
 
-    private _setDiscounts(): AffirmDiscount {
+    private _getDiscounts(): AffirmDiscount {
         const state = this._store.getState();
         const cart = state.cart.getCart();
 
@@ -270,4 +305,5 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
 
         return discounts;
     }
+
 }

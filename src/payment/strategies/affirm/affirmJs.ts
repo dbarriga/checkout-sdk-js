@@ -1,6 +1,6 @@
 export default Function(`
 'use strict';
-return function affirmJS(apiKey, scriptURL) {
+return function loadAffirmJS(apiKey, scriptURL) {
     var _affirm_config = {
         public_api_key:  apiKey,
         script:          scriptURL

@@ -5,6 +5,6 @@ export default interface RemoteCheckoutState {
 }
 
 export type RemoteCheckoutStateData =
-{ affirm?: AffirmRemoteCheckout } &
+    { affirm?: AffirmRemoteCheckout } &
     { amazon?: AmazonPayRemoteCheckout } &
     { afterpay?: AfterpayRemoteCheckout };

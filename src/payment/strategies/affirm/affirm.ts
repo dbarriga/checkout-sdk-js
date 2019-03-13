@@ -1,3 +1,22 @@
+export interface Affirm {
+    checkout: AffirmCheckout;
+    ui: {
+        ready(callback: Function): void;
+        error: {
+            on(event: string, callback: Function): void
+        }
+    }
+}
+
+interface AffirmCheckout {
+    (options: AffirmRequestData): void;
+    open(): void;
+}
+
+export interface AffirmHostWindow extends Window {
+    affirm: Affirm;
+}
+
 export interface AffirmRequestData {
     merchant: {
         user_confirmation_url: string,

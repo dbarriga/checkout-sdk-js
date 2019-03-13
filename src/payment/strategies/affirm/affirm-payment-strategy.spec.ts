@@ -22,7 +22,7 @@ import PaymentMethod from '../../payment-method';
 import { getAffirm } from '../../payment-methods.mock';
 import PaymentRequestSender from '../../payment-request-sender';
 
-import AffirmPaymentStrategy from './affirm-payment-strategy';
+import {AffirmPaymentStrategy, AffirmScriptLoader} from './';
 import { getAffirmScriptMock } from './affirm.mock';
 import affirmJS from './affirmJs';
 
@@ -44,6 +44,7 @@ describe('AffirmPaymentStrategy', () => {
     let submitPaymentAction: Observable<Action>;
     let store: CheckoutStore;
     let strategy: AffirmPaymentStrategy;
+    let scriptLoader: AffirmScriptLoader;
 
     beforeEach(() => {
         const requestSender = createRequestSender();
@@ -74,11 +75,13 @@ describe('AffirmPaymentStrategy', () => {
         remoteCheckoutActionCreator = new RemoteCheckoutActionCreator(
             new RemoteCheckoutRequestSender(requestSender)
         );
+        scriptLoader = new AffirmScriptLoader();
         strategy = new AffirmPaymentStrategy(
             store,
             orderActionCreator,
             paymentActionCreator,
-            remoteCheckoutActionCreator
+            remoteCheckoutActionCreator,
+            scriptLoader
         );
 
         paymentMethod = getAffirm();
@@ -148,10 +151,6 @@ describe('AffirmPaymentStrategy', () => {
             expect(store.dispatch).toHaveBeenCalledWith(initializePaymentAction);
         });
 
-        it('does not resolve if execution is successful', () => {
-            expect(successHandler).not.toHaveBeenCalled();
-        });
-
         it('call affirm methods', () => {
             expect(window.affirm.checkout).toHaveBeenCalled();
             expect(window.affirm.checkout.open).toHaveBeenCalled();
@@ -208,7 +207,8 @@ describe('AffirmPaymentStrategy', () => {
                 store,
                 orderActionCreator,
                 paymentActionCreator,
-                remoteCheckoutActionCreator
+                remoteCheckoutActionCreator,
+                scriptLoader
             );
 
             jest.spyOn(store, 'dispatch');
