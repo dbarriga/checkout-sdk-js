@@ -199,7 +199,6 @@ export function getAffirm(): PaymentMethod {
         type: 'PAYMENT_TYPE_API',
         clientToken: 'foo',
         initializationData: {
-            publicKey: 'BZXX1Q1YF6Y59QNH',
             token: '9O56RF6E0TJYUFTT',
         },
     };

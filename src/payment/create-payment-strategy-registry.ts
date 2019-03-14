@@ -71,7 +71,7 @@ export default function createPaymentStrategyRegistry(
             store,
             orderActionCreator,
             paymentActionCreator,
-            remoteCheckoutActionCreator,
+            paymentMethodActionCreator,
             new AffirmScriptLoader()
         )
     );

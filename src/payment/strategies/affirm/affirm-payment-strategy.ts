@@ -1,9 +1,9 @@
 import { CheckoutStore, InternalCheckoutSelectors } from '../../../checkout';
 import { MissingDataError, MissingDataErrorType, NotInitializedError, NotInitializedErrorType } from '../../../common/error/errors';
 import { OrderActionCreator, OrderRequestBody } from '../../../order';
-import { RemoteCheckoutActionCreator } from '../../../remote-checkout';
 import { PaymentArgumentInvalidError } from '../../errors';
 import PaymentActionCreator from '../../payment-action-creator';
+import PaymentMethodActionCreator from '../../payment-method-action-creator';
 import { PaymentInitializeOptions, PaymentRequestOptions } from '../../payment-request-options';
 import PaymentStrategy from '../payment-strategy';
 
@@ -18,25 +18,28 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         private _store: CheckoutStore,
         private _orderActionCreator: OrderActionCreator,
         private _paymentActionCreator: PaymentActionCreator,
-        private _remoteCheckoutActionCreator: RemoteCheckoutActionCreator,
+        private _paymentMethodActionCreator: PaymentMethodActionCreator,
         private _affirmScriptLoader: AffirmScriptLoader
     ) { }
 
     initialize(options: PaymentInitializeOptions): Promise<InternalCheckoutSelectors> {
-        const state = this._store.getState();
-        const paymentMethod = state.paymentMethods.getPaymentMethod(options.methodId, options.gatewayId);
+        return this._store.dispatch(this._paymentMethodActionCreator.loadPaymentMethod(options.methodId))
+            .then(state => {
+                const paymentMethod = state.paymentMethods.getPaymentMethod(options.methodId);
 
-        if (!paymentMethod) {
-            throw new MissingDataError(MissingDataErrorType.MissingPaymentMethod);
-        }
+                if (!paymentMethod || !paymentMethod.clientToken) {
+                    throw new MissingDataError(MissingDataErrorType.MissingPaymentMethod);
+                }
 
-        const { testMode } = paymentMethod.config;
-        const { publicKey } = paymentMethod.initializationData;
+                const { testMode } = paymentMethod.config;
+                const publicKey = paymentMethod.clientToken;
 
-        return this._affirmScriptLoader.load(publicKey, testMode)
-            .then(affirm => {
-                this.affirm = affirm;
-                return this._store.getState();
+                return this._affirmScriptLoader.load(publicKey, testMode)
+                    .then(affirm => {
+                        this.affirm = affirm;
+
+                        return this._store.getState();
+                    });
             });
     }
 
@@ -48,9 +51,10 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             throw new PaymentArgumentInvalidError(['payment.methodId']);
         }
 
-        return this._store.dispatch(this._remoteCheckoutActionCreator.initializePayment(paymentId, { useStoreCredit }))
+        return this._store.dispatch(this._orderActionCreator.submitOrder({ useStoreCredit }, options))
             .then(() => {
-                this._affirmCalls(useStoreCredit)
+                this._affirmCalls(useStoreCredit);
+
                 return new Promise<never>(() => { });
             });
 
@@ -65,36 +69,19 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
     }
 
     finalize(options: PaymentRequestOptions): Promise<InternalCheckoutSelectors> {
-        return this._store.dispatch(this._remoteCheckoutActionCreator.loadSettings(options.methodId))
-            .then(state => {
-                const payment = state.payment.getPaymentId();
-                const paymentMethod = state.paymentMethods.getPaymentMethod(options.methodId, options.gatewayId);
-                const affirm = state.remoteCheckout.getCheckout('affirm');
+        const state = this._store.getState();
+        const payment = state.payment.getPaymentId();
 
-                if (!payment) {
-                    throw new MissingDataError(MissingDataErrorType.MissingCheckout);
-                }
+        if (!payment) {
+            throw new MissingDataError(MissingDataErrorType.MissingCheckout);
+        }
 
-                if (!paymentMethod) {
-                    throw new MissingDataError(MissingDataErrorType.MissingPaymentMethod);
-                }
+        const paymentPayload = {
+            methodId: payment.providerId,
+            paymentData: { nonce: 'XXXXXXX' },
+        };
 
-                if (!affirm || !affirm.settings) {
-                    throw new NotInitializedError(NotInitializedErrorType.PaymentNotInitialized);
-                }
-
-                const orderPayload = {
-                    useStoreCredit: affirm.settings.useStoreCredit,
-                };
-
-                const paymentPayload = {
-                    methodId: payment.providerId,
-                    paymentData: { nonce: paymentMethod.initializationData.token },
-                };
-
-                return this._store.dispatch(this._orderActionCreator.submitOrder(orderPayload, options))
-                    .then(() => this._store.dispatch(this._paymentActionCreator.submitPayment(paymentPayload)));
-            });
+        return this._store.dispatch(this._paymentActionCreator.submitPayment(paymentPayload));
     }
 
     private _affirmCalls(useStoreCredit: boolean = false) {
@@ -111,14 +98,9 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
 
         this.affirm.checkout(this._getCheckoutInformation(useStoreCredit));
         this.affirm.checkout.open();
-        /*this.affirm.ui.ready(
-            () => {
-                const _this = this;
-                this.affirm.ui.error.on('close', () => {
-                    window.location.href = `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`;
-                });
-            }
-        )*/
+        this.affirm.ui.ready(
+            () => this._closeError()
+        );
     }
     private _getCheckoutInformation(useStoreCredit: boolean = false): AffirmRequestData {
         const state = this._store.getState();
@@ -304,6 +286,23 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         }
 
         return discounts;
+    }
+
+    private _closeError() {
+        const state = this._store.getState();
+        const config = state.config.getStoreConfig();
+
+        if (!this.affirm) {
+            throw new NotInitializedError(NotInitializedErrorType.PaymentNotInitialized);
+        }
+
+        if (!config) {
+            throw new MissingDataError(MissingDataErrorType.MissingCheckoutConfig);
+        }
+
+        this.affirm.ui.error.on('close', () => {
+            window.location.href = `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`;
+        });
     }
 
 }

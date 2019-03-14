@@ -1,11 +1,11 @@
 export interface Affirm {
     checkout: AffirmCheckout;
     ui: {
-        ready(callback: Function): void;
         error: {
-            on(event: string, callback: Function): void
-        }
-    }
+            on(event: string, callback: () => void): void,
+        };
+        ready(callback: () => void): void;
+    };
 }
 
 interface AffirmCheckout {
