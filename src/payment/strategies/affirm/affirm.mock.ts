@@ -4,6 +4,9 @@ export function getAffirmScriptMock(): any {
         checkout: jest.fn(),
         ui: {
             ready: jest.fn(),
+            error: {
+                on: jest.fn(),
+            },
         },
     };
 }

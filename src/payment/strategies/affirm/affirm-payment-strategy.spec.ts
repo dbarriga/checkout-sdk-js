@@ -12,9 +12,9 @@ import { MissingDataError } from '../../../common/error/errors';
 import { getConfigState } from '../../../config/configs.mock';
 import { getCustomerState } from '../../../customer/customers.mock';
 import { OrderActionCreator, OrderActionType, OrderRequestBody, OrderRequestSender } from '../../../order';
+import { OrderFinalizationNotRequiredError } from '../../../order/errors';
 import { getOrderRequestBody } from '../../../order/internal-orders.mock';
 import { getPaymentMethodsState } from '../../../payment/payment-methods.mock';
-import { RemoteCheckoutActionCreator, RemoteCheckoutActionType, RemoteCheckoutRequestSender } from '../../../remote-checkout';
 import { getConsignmentsState } from '../../../shipping/consignments.mock';
 import PaymentActionCreator from '../../payment-action-creator';
 import { PaymentActionType } from '../../payment-actions';
@@ -26,24 +26,19 @@ import { getAffirm } from '../../payment-methods.mock';
 import PaymentRequestSender from '../../payment-request-sender';
 
 import { AffirmPaymentStrategy, AffirmScriptLoader } from './';
+import { Affirm } from './affirm';
 import { getAffirmScriptMock } from './affirm.mock';
-import affirmJS from './affirmJs';
-
-jest.mock('./affirmJs');
-declare global { interface Window { affirm: any; } }
 
 describe('AffirmPaymentStrategy', () => {
+    let affirm: Affirm;
     let checkoutValidator: CheckoutValidator;
-    let initializePaymentAction: Observable<Action>;
     let checkoutRequestSender: CheckoutRequestSender;
-    let loadRemoteSettingsAction: Observable<Action>;
     let orderActionCreator: OrderActionCreator;
     let orderRequestSender: OrderRequestSender;
     let payload: OrderRequestBody;
     let paymentActionCreator: PaymentActionCreator;
     let paymentMethodActionCreator: PaymentMethodActionCreator;
     let paymentMethod: PaymentMethod;
-    let remoteCheckoutActionCreator: RemoteCheckoutActionCreator;
     let submitOrderAction: Observable<Action>;
     let submitPaymentAction: Observable<Action>;
     let store: CheckoutStore;
@@ -53,13 +48,10 @@ describe('AffirmPaymentStrategy', () => {
 
     beforeEach(() => {
         const requestSender = createRequestSender();
-        affirmJS.mockImplementation(() => {
-            return {
-                default: jest.fn().mockReturnValue(true),
-            };
-        });
-        window.affirm = getAffirmScriptMock();
-        window.affirm.checkout.open = jest.fn();
+
+        affirm = getAffirmScriptMock();
+        affirm.checkout.open = jest.fn();
+        affirm.ui.error.on = jest.fn();
         orderRequestSender = new OrderRequestSender(requestSender);
         store = createCheckoutStore({
             checkout: getCheckoutState(),
@@ -78,9 +70,6 @@ describe('AffirmPaymentStrategy', () => {
             orderActionCreator
         );
         paymentMethodActionCreator = new PaymentMethodActionCreator(new PaymentMethodRequestSender(requestSender));
-        remoteCheckoutActionCreator = new RemoteCheckoutActionCreator(
-            new RemoteCheckoutRequestSender(requestSender)
-        );
         scriptLoader = new AffirmScriptLoader();
         strategy = new AffirmPaymentStrategy(
             store,
@@ -98,13 +87,6 @@ describe('AffirmPaymentStrategy', () => {
                 gatewayId: paymentMethod.gateway,
             },
         });
-
-        initializePaymentAction = of(createAction(RemoteCheckoutActionType.InitializeRemotePaymentRequested));
-        loadRemoteSettingsAction = of(createAction(
-            RemoteCheckoutActionType.LoadRemoteSettingsSucceeded,
-            { useStoreCredit: false },
-            { methodId: paymentMethod.id }
-        ));
         submitOrderAction = of(createAction(OrderActionType.SubmitOrderRequested));
         submitPaymentAction = of(createAction(PaymentActionType.SubmitPaymentRequested));
         loadPaymentMethodAction = of(createAction(PaymentMethodActionType.LoadPaymentMethodSucceeded, paymentMethod, { methodId: paymentMethod.id }));
@@ -113,12 +95,6 @@ describe('AffirmPaymentStrategy', () => {
 
         jest.spyOn(orderActionCreator, 'submitOrder')
             .mockReturnValue(submitOrderAction);
-
-        jest.spyOn(remoteCheckoutActionCreator, 'initializePayment')
-            .mockReturnValue(initializePaymentAction);
-
-        jest.spyOn(remoteCheckoutActionCreator, 'loadSettings')
-            .mockReturnValue(loadRemoteSettingsAction);
 
         jest.spyOn(paymentActionCreator, 'submitPayment')
             .mockReturnValue(submitPaymentAction);
@@ -129,7 +105,7 @@ describe('AffirmPaymentStrategy', () => {
         jest.spyOn(paymentMethodActionCreator, 'loadPaymentMethod')
             .mockReturnValue(loadPaymentMethodAction);
 
-        jest.spyOn(scriptLoader, 'load').mockReturnValue(Promise.resolve(window.affirm));
+        jest.spyOn(scriptLoader, 'load').mockReturnValue(Promise.resolve(affirm));
 
         payload = merge({}, getOrderRequestBody(), {
             payment: {
@@ -174,9 +150,9 @@ describe('AffirmPaymentStrategy', () => {
         });
 
         it('call affirm methods', () => {
-            expect(window.affirm.checkout).toHaveBeenCalled();
-            expect(window.affirm.checkout.open).toHaveBeenCalled();
-            expect(window.affirm.ui.ready).toHaveBeenCalled();
+            expect(affirm.checkout).toHaveBeenCalled();
+            expect(affirm.checkout.open).toHaveBeenCalled();
+            expect(affirm.ui.error.on).toHaveBeenCalled();
         });
 
         it('does not load affirm if config does not exist', async () => {
@@ -207,71 +183,14 @@ describe('AffirmPaymentStrategy', () => {
         });
     });
 
-    /*describe('#finalize()', () => {
-
-        it('submits the order and the payment', async () => {
-            store = createCheckoutStore(merge({}, getCheckoutStoreState(), {
-                checkout: {
-                    data: {
-                        ...getCheckout(),
-                        payments: [{
-                            ...getCheckoutPayment(),
-                            providerId: paymentMethod.id,
-                            gatewayId: paymentMethod.gateway,
-                        }],
-                    },
-                },
-                order: null,
-                paymentMethods: getPaymentMethodsState(),
-            }));
-
-            strategy = new AffirmPaymentStrategy(
-                store,
-                orderActionCreator,
-                paymentActionCreator,
-                remoteCheckoutActionCreator,
-                paymentMethodActionCreator,
-                scriptLoader
-            );
-
-            jest.spyOn(store, 'dispatch');
-            jest.spyOn(store.getState().paymentMethods, 'getPaymentMethod')
-                .mockReturnValue(paymentMethod);
-
-            await strategy.initialize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
-            await strategy.finalize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
-
-            expect(store.dispatch).toHaveBeenCalledWith(submitOrderAction);
-            expect(store.dispatch).toHaveBeenCalledWith(submitPaymentAction);
-
-            expect(orderActionCreator.submitOrder).toHaveBeenCalledWith(
-                { useStoreCredit: false },
-                { methodId: paymentMethod.id, gatewayId: paymentMethod.gateway }
-            );
-
-            expect(paymentActionCreator.submitPayment).toHaveBeenCalledWith({
-                methodId: paymentMethod.id,
-                paymentData: {nonce: paymentMethod.initializationData.token},
-            });
-        });
-
-        it('throws error if unable to finalize order due to missing data', async () => {
+    describe('#finalize()', () => {
+        it('throws error to inform that order finalization is not required', async () => {
             try {
-                await strategy.finalize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
+                await strategy.finalize();
             } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
+                expect(error).toBeInstanceOf(OrderFinalizationNotRequiredError);
             }
         });
-
-        it('throws error if unable to finalize order due to missing payment information', async () => {
-            jest.spyOn(store.getState().payment, 'getPaymentId').mockReturnValue(undefined);
-            try {
-                await strategy.finalize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
-            } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
-            }
-        });
-
-    });*/
+    });
 
 });

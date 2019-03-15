@@ -10,11 +10,21 @@ export interface Affirm {
 
 interface AffirmCheckout {
     (options: AffirmRequestData): void;
-    open(): void;
+    open(modalOptions: any): void;
+    init(): void;
 }
 
 export interface AffirmHostWindow extends Window {
-    affirm: Affirm;
+    affirm?: Affirm;
+}
+
+export interface SuccessAffirm {
+    checkout_token: string;
+    created: string;
+}
+
+export interface FailAffirm {
+    reason: string;
 }
 
 export interface AffirmRequestData {
