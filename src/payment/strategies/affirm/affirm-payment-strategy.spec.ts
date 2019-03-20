@@ -8,7 +8,7 @@ import { getBillingAddressState } from '../../../billing/billing-addresses.mock'
 import { getCartState } from '../../../cart/carts.mock';
 import { createCheckoutStore, CheckoutRequestSender, CheckoutStore, CheckoutValidator } from '../../../checkout';
 import { getCheckoutState } from '../../../checkout/checkouts.mock';
-import { MissingDataError } from '../../../common/error/errors';
+import { MissingDataError, NotInitializedError } from '../../../common/error/errors';
 import { getConfigState } from '../../../config/configs.mock';
 import { getCustomerState } from '../../../customer/customers.mock';
 import { OrderActionCreator, OrderActionType, OrderRequestBody, OrderRequestSender } from '../../../order';
@@ -16,6 +16,7 @@ import { OrderFinalizationNotRequiredError } from '../../../order/errors';
 import { getOrderRequestBody } from '../../../order/internal-orders.mock';
 import { getPaymentMethodsState } from '../../../payment/payment-methods.mock';
 import { getConsignmentsState } from '../../../shipping/consignments.mock';
+import { PaymentArgumentInvalidError, PaymentMethodCancelledError } from '../../errors';
 import PaymentActionCreator from '../../payment-action-creator';
 import { PaymentActionType } from '../../payment-actions';
 import PaymentMethod from '../../payment-method';
@@ -133,29 +134,69 @@ describe('AffirmPaymentStrategy', () => {
     });
 
     describe('#execute()', () => {
-        const successHandler = jest.fn();
 
         beforeEach(async () => {
             await strategy.initialize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
 
-            strategy.execute(payload).then(successHandler);
-
-            await new Promise(resolve => process.nextTick(resolve));
-        });
-
-        it('submit order to Affirm', async () => {
+            jest.spyOn(store, 'dispatch').mockReturnValue(Promise.resolve());
+            jest.spyOn(affirm.checkout, 'open').mockImplementation(({ onSuccess }) => {
+                onSuccess({
+                    checkout_token: '1234',
+                    created: '1234',
+                });
+            });
             jest.spyOn(store.getState().paymentMethods, 'getPaymentMethod').mockReturnValue(paymentMethod);
-            expect(store.dispatch).toHaveBeenCalledWith(submitOrderAction);
-            expect(orderActionCreator.submitOrder).toHaveBeenCalledWith({ useStoreCredit: false }, undefined);
+
         });
 
-        it('call affirm methods', () => {
+        it('creates order, checkout and payment', async () => {
+            const options = { methodId: 'affirm', gatewayId: undefined };
+
+            await strategy.execute(payload, options);
+
+            expect(store.dispatch).toHaveBeenCalledWith(submitOrderAction);
+
+            expect(orderActionCreator.submitOrder).toHaveBeenCalledWith({ useStoreCredit: false }, options);
             expect(affirm.checkout).toHaveBeenCalled();
             expect(affirm.checkout.open).toHaveBeenCalled();
             expect(affirm.ui.error.on).toHaveBeenCalled();
+            expect(store.dispatch).toHaveBeenCalledWith(submitPaymentAction);
+            expect(paymentActionCreator.submitPayment).toBeCalledWith({
+                methodId: paymentMethod.id,
+                paymentData: { nonce: '1234' },
+            });
+
         });
 
-        it('does not load affirm if config does not exist', async () => {
+        it('returns error on affirm if users cancel flow', async () => {
+            jest.spyOn(affirm.checkout, 'open').mockImplementation(({ onFail }) => {
+                onFail();
+            });
+            try {
+                await strategy.execute(payload);
+            } catch (error) {
+                expect(error).toBeInstanceOf(PaymentMethodCancelledError);
+            }
+        });
+
+        it('does not create payment if moethodId not specified', async () => {
+            try {
+                await strategy.execute(payload);
+            } catch (error) {
+                expect(error).toBeInstanceOf(NotInitializedError);
+            }
+        });
+
+        it('does not create order if paymentId is not set', async () => {
+            payload.payment = undefined;
+            try {
+                await strategy.execute(payload);
+            } catch (error) {
+                expect(error).toBeInstanceOf(PaymentArgumentInvalidError);
+            }
+        });
+
+        it('does not create affirm object if config does not exist', async () => {
             jest.spyOn(store.getState().config, 'getStoreConfig').mockReturnValue(undefined);
             try {
                 await strategy.execute(payload);
@@ -164,7 +205,7 @@ describe('AffirmPaymentStrategy', () => {
             }
         });
 
-        it('does not load affirm if billingAddress does not exist', async () => {
+        it('does not create affirm object if billingAddress does not exist', async () => {
             jest.spyOn(store.getState().billingAddress, 'getBillingAddress').mockReturnValue(undefined);
             try {
                 await strategy.execute(payload);
@@ -173,13 +214,37 @@ describe('AffirmPaymentStrategy', () => {
             }
         });
 
-        it('does not load affirm if cart does not exist', async () => {
+        it('does not create affirm object if cart does not exist', async () => {
             jest.spyOn(store.getState().cart, 'getCart').mockReturnValue(undefined);
             try {
                 await strategy.execute(payload);
             } catch (error) {
                 expect(error).toBeInstanceOf(MissingDataError);
             }
+        });
+    });
+
+    describe('#deinitialize()', () => {
+
+        let submitOrderAction: Observable<Action>;
+        const affirmOptions = { methodId: 'affirm', gatewayId: undefined };
+
+        beforeEach(async () => {
+            submitOrderAction = of(createAction(OrderActionType.SubmitOrderRequested));
+            orderActionCreator.submitOrder = jest.fn(() => submitOrderAction);
+
+            await strategy.initialize(affirmOptions);
+        });
+
+        it('expect to not call the orderActionCreator', async () => {
+            await strategy.deinitialize(affirmOptions);
+
+            expect(orderActionCreator.submitOrder).not.toHaveBeenCalled();
+        });
+
+        it('deinitializes strategy', async () => {
+            await strategy.deinitialize();
+            expect(await strategy.deinitialize()).toEqual(store.getState());
         });
     });
 
