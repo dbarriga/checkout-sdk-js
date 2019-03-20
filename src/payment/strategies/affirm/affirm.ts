@@ -10,8 +10,13 @@ export interface Affirm {
 
 interface AffirmCheckout {
     (options: AffirmRequestData): void;
-    open(modalOptions: any): void;
+    open(modalOptions: AffirmCallback): void;
     init(): void;
+}
+
+interface AffirmCallback {
+    onFail(): void;
+    onSuccess(success: SuccessAffirm): void;
 }
 
 export interface AffirmHostWindow extends Window {
