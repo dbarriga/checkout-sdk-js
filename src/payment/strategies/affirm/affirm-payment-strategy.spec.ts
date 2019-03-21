@@ -16,7 +16,7 @@ import { OrderFinalizationNotRequiredError } from '../../../order/errors';
 import { getOrderRequestBody } from '../../../order/internal-orders.mock';
 import { getPaymentMethodsState } from '../../../payment/payment-methods.mock';
 import { getConsignmentsState } from '../../../shipping/consignments.mock';
-import { PaymentArgumentInvalidError, PaymentMethodCancelledError } from '../../errors';
+import { PaymentMethodCancelledError } from '../../errors';
 import PaymentActionCreator from '../../payment-action-creator';
 import { PaymentActionType } from '../../payment-actions';
 import PaymentMethod from '../../payment-method';

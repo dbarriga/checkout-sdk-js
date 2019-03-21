@@ -122,6 +122,7 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             throw new MissingDataError(MissingDataErrorType.MissingCheckout);
         }
         const grandTotal = useStoreCredit ? checkout.grandTotal - checkout.customer.storeCredit : checkout.grandTotal;
+
         return  {
             merchant: {
                 user_confirmation_url: `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=success`,
