@@ -119,12 +119,7 @@ describe('AffirmPaymentStrategy', () => {
     describe('#initialize()', () => {
         it('throws error if client token is missing', async () => {
             paymentMethod.clientToken = '';
-            try {
-
-                await strategy.initialize({ methodId: paymentMethod.id });
-            } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
-            }
+            await expect(strategy.initialize({ methodId: paymentMethod.id })).rejects.toThrow(MissingDataError);
         });
 
         it('loads affirm script from snippet', async () => {
@@ -134,7 +129,6 @@ describe('AffirmPaymentStrategy', () => {
     });
 
     describe('#execute()', () => {
-
         beforeEach(async () => {
             await strategy.initialize({ methodId: paymentMethod.id, gatewayId: paymentMethod.gateway });
 
@@ -146,7 +140,6 @@ describe('AffirmPaymentStrategy', () => {
                 });
             });
             jest.spyOn(store.getState().paymentMethods, 'getPaymentMethod').mockReturnValue(paymentMethod);
-
         });
 
         it('creates order, checkout and payment', async () => {
@@ -165,62 +158,38 @@ describe('AffirmPaymentStrategy', () => {
                 methodId: paymentMethod.id,
                 paymentData: { nonce: '1234' },
             });
-
         });
 
         it('returns error on affirm if users cancel flow', async () => {
             jest.spyOn(affirm.checkout, 'open').mockImplementation(({ onFail }) => {
                 onFail();
             });
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(PaymentMethodCancelledError);
-            }
+            await expect(strategy.execute(payload)).rejects.toThrow(PaymentMethodCancelledError);
         });
 
         it('does not create payment if moethodId not specified', async () => {
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(NotInitializedError);
-            }
+            await expect(strategy.execute(payload)).rejects.toThrow(NotInitializedError);
         });
 
-        it('does not create order if paymentId is not set', async () => {
+        it('does not create order if paymentId is not set', () => {
             payload.payment = undefined;
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(PaymentArgumentInvalidError);
-            }
+            const error = 'Unable to submit payment for the order because the payload is invalid. Make sure the following fields are provided correctly: payment.methodId.';
+            expect(() => strategy.execute(payload)).toThrowError(error);
         });
 
         it('does not create affirm object if config does not exist', async () => {
             jest.spyOn(store.getState().config, 'getStoreConfig').mockReturnValue(undefined);
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
-            }
+            await expect(strategy.execute(payload)).rejects.toThrow(MissingDataError);
         });
 
         it('does not create affirm object if billingAddress does not exist', async () => {
             jest.spyOn(store.getState().billingAddress, 'getBillingAddress').mockReturnValue(undefined);
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
-            }
+            await expect(strategy.execute(payload)).rejects.toThrow(MissingDataError);
         });
 
         it('does not create affirm object if cart does not exist', async () => {
             jest.spyOn(store.getState().cart, 'getCart').mockReturnValue(undefined);
-            try {
-                await strategy.execute(payload);
-            } catch (error) {
-                expect(error).toBeInstanceOf(MissingDataError);
-            }
+            await expect(strategy.execute(payload)).rejects.toThrow(MissingDataError);
         });
     });
 
@@ -250,11 +219,7 @@ describe('AffirmPaymentStrategy', () => {
 
     describe('#finalize()', () => {
         it('throws error to inform that order finalization is not required', async () => {
-            try {
-                await strategy.finalize();
-            } catch (error) {
-                expect(error).toBeInstanceOf(OrderFinalizationNotRequiredError);
-            }
+            await expect(strategy.finalize()).rejects.toThrow(OrderFinalizationNotRequiredError);
         });
     });
 

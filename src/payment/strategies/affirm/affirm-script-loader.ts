@@ -17,7 +17,6 @@ export default class AffirmScriptLoader {
         }
 
         return Promise.resolve(this._window.affirm);
-
     }
 
     private _getScriptURI(testMode: boolean = false): string {

@@ -28,10 +28,6 @@ export interface SuccessAffirm {
     created: string;
 }
 
-export interface FailAffirm {
-    reason: string;
-}
-
 export interface AffirmRequestData {
     merchant: {
         user_confirmation_url: string,

@@ -32,8 +32,7 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
                     throw new MissingDataError(MissingDataErrorType.MissingPaymentMethod);
                 }
 
-                const { testMode } = paymentMethod.config;
-                const publicKey = paymentMethod.clientToken;
+                const { config: {testMode}, clientToken: publicKey } = paymentMethod;
 
                 return this._affirmScriptLoader.load(publicKey, testMode)
                     .then(affirm => {
@@ -54,20 +53,21 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
 
         return this._store.dispatch(this._orderActionCreator.submitOrder({ useStoreCredit }, options))
             .then((): Promise<SuccessAffirm> => {
-                if (!this.affirm) {
+                const affirm = this.affirm;
+                if (!affirm) {
                     throw new NotInitializedError(NotInitializedErrorType.PaymentNotInitialized);
                 }
-                this.affirm.checkout(this._getCheckoutInformation(useStoreCredit));
+                affirm.checkout(this._getCheckoutInformation(useStoreCredit));
 
                 return new Promise((resolve, reject) => {
-                    if (!this.affirm) {
+                    if (!affirm) {
                         throw new NotInitializedError(NotInitializedErrorType.PaymentNotInitialized);
                     }
-                    this.affirm.checkout.open({
+                    affirm.checkout.open({
                         onFail: () => { reject(new PaymentMethodCancelledError()); },
                         onSuccess: (successObject: SuccessAffirm) => { resolve(successObject); },
                     });
-                    this.affirm.ui.error.on('close', () => {
+                    affirm.ui.error.on('close', () => {
                         reject(new PaymentMethodCancelledError());
                     });
                 });
@@ -102,7 +102,7 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
         const state = this._store.getState();
         const checkout = state.checkout.getCheckout();
         const config = state.config.getStoreConfig();
-        const consigments = state.consignments.getConsignments();
+        const consignments = state.consignments.getConsignments();
 
         if (!config) {
             throw new MissingDataError(MissingDataErrorType.MissingCheckoutConfig);
@@ -112,17 +112,17 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             throw new MissingDataError(MissingDataErrorType.MissingCheckout);
         }
 
-        if (!consigments) {
+        if (!consignments) {
             throw new MissingDataError(MissingDataErrorType.MissingCheckout);
         }
 
-        const consigment = consigments[0];
+        const consignment = consignments[0];
 
-        if (!consigment || !consigment.selectedShippingOption) {
+        if (!consignment || !consignment.selectedShippingOption) {
             throw new MissingDataError(MissingDataErrorType.MissingCheckout);
         }
         const grandTotal = useStoreCredit ? checkout.grandTotal - checkout.customer.storeCredit : checkout.grandTotal;
-        const affirmRequestObject = {
+        return  {
             merchant: {
                 user_confirmation_url: `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=success`,
                 user_cancel_url: `${config.links.checkoutLink}.php?action=set_external_checkout&provider=affirm&status=cancelled`,
@@ -133,7 +133,7 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             items: this._getItems(),
             discounts: this._getDiscounts(),
             metadata: {
-                shipping_type: consigment.selectedShippingOption.type,
+                shipping_type: consignment.selectedShippingOption.type,
                 mode: 'modal',
             },
             order_id: checkout.orderId ? checkout.orderId.toString() : '',
@@ -142,7 +142,6 @@ export default class AffirmPaymentStrategy implements PaymentStrategy {
             total: (grandTotal > 0 ? grandTotal : 0) * 100,
         };
 
-        return affirmRequestObject;
     }
 
     private _getBillingAddress(): AffirmAddress {

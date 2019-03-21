@@ -1,3 +1,6 @@
+/**
+ * Used this approach as Affirm uses snipped for initializing. Please refer to Affirm documentation in: https://docs.affirm.com/Integrate_Affirm/Direct_API#1._Add_Affirm.js
+ */
 export default Function(`
 'use strict';
 return function loadAffirmJS(apiKey, scriptURL) {
